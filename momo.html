@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>視覺訓練 - 難易度可調版</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; touch-action: none; font-family: -apple-system, sans-serif; }
+        
+        #start-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; text-align: center; }
+        .btn-large { padding: 25px 40px; font-size: 28px; cursor: pointer; border: none; border-radius: 20px; margin: 15px; font-weight: bold; }
+        #test-audio-btn { background: #ffaa00; color: #000; }
+        #start-btn { background: #28a745; color: white; }
+
+        #target-container { position: absolute; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        
+        /* 眼動儀專用的隱形觸控區 (由 JS 動態控制大小) */
+        #hitbox { position: absolute; border-radius: 50%; z-index: 20; cursor: pointer; }
+        /* 測試時如果想看到判定範圍，可以把下面這行的註解拿掉 */
+        /* #hitbox { background: rgba(255, 0, 0, 0.3); } */
+        
+        #target-img { background-size: contain; background-repeat: no-repeat; background-position: center; width: 100%; height: 100%; pointer-events: none; }
+        @keyframes butterfly-pulse { 0% { transform: scale(1); } 100% { transform: scale(1.1); } }
+        .pulsing { animation: butterfly-pulse 0.8s ease-in-out infinite alternate; }
+
+        #dwell-bar-container { position: absolute; bottom: -40px; width: 120%; height: 20px; background: rgba(255,255,255,0.3); border-radius: 10px; overflow: hidden; display: none; pointer-events: none; z-index: 30;}
+        #dwell-bar-fill { width: 0%; height: 100%; background: #00FF00; transition: width 0.05s linear; }
+
+        #settings-btn { position: fixed; top: 20px; left: 20px; z-index: 100; background: rgba(255,255,255,0.2); color: white; border: 1px solid #fff; padding: 12px 20px; border-radius: 10px; font-size: 18px; }
+        #settings-panel { position: fixed; top: 0; left: 0; width: 340px; max-width: 90vw; height: 100%; background: #1a1a1a; color: white; padding: 20px; z-index: 1000; display: none; overflow-y: auto; box-sizing: border-box;}
+        
+        .setting-item { margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        label { display: block; margin-bottom: 8px; font-size: 18px; color: #00FFCC; }
+        input[type="range"] { width: 100%; height: 40px; }
+        select { width: 100%; height: 40px; font-size: 18px; background: #333; color: white; border: 1px solid #555; border-radius: 8px; }
+        .checkbox-group { display: flex; flex-direction: column; gap: 10px; }
+        .checkbox-item { display: flex; align-items: center; font-size: 18px; }
+        .checkbox-item input { width: 25px; height: 25px; margin-right: 15px; }
+
+        #counter { position: fixed; top: 20px; right: 20px; color: #FFFF00; font-size: 30px; font-weight: bold; pointer-events: none; z-index: 50; }
+        #fw-canvas { position: fixed; top:0; left:0; pointer-events: none; z-index: 90; }
+    </style>
+</head>
+<body>
+
+    <audio id="snd-magic" src="magic.mp3" preload="auto"></audio>
+    <audio id="snd-handsup" src="handsup.mp3" preload="auto"></audio>
+
+    <div id="start-overlay">
+        <h1>視覺注視訓練</h1>
+        <p style="color:#ccc; font-size:18px; margin-bottom: 30px;">老師，請先點擊黃色按鈕確認設備有聲音</p>
+        <button id="test-audio-btn" class="btn-large">🔊 1. 測試音效</button>
+        <button id="start-btn" class="btn-large">✅ 2. 開始教學</button>
+    </div>
+
+    <button id="settings-btn">⚙️ 設定</button>
+    <div id="counter">進度: 0 / 5</div>
+
+    <div id="settings-panel">
+        <h2 style="margin-top:0;">教學設定</h2>
+        <div class="setting-item">
+            <label>圖片大小: <span id="size-val">250</span>px</label>
+            <input type="range" id="size-slider" min="150" max="500" value="250">
+        </div>
+        
+        <div class="setting-item">
+            <label>🎯 觸控判定範圍</label>
+            <select id="hitbox-select">
+                <option value="1.5">簡單版 (放大 1.5 倍)</option>
+                <option value="1.2" selected>正常版 (放大 1.2 倍)</option>
+            </select>
+        </div>
+
+        <div class="setting-item">
+            <label>⌛ 注視時間: <span id="dwell-val">1.0</span> 秒</label>
+            <input type="range" id="dwell-slider" min="0.5" max="3" step="0.5" value="1.0">
+        </div>
+        <div class="setting-item">
+            <label>🦋 蝴蝶展示: <span id="btimer-val">4.0</span> 秒</label>
+            <input type="range" id="btimer-slider" min="3" max="15" step="1" value="4">
+        </div>
+        <div class="setting-item">
+            <label>🐢 移動速度: <span id="speed-val">15</span> 秒</label>
+            <input type="range" id="speed-slider" min="5" max="45" step="5" value="15">
+        </div>
+        <div class="setting-item">
+            <label>🛤️ 移動路線 (隨機雙向)</label>
+            <div class="checkbox-group">
+                <label class="checkbox-item"><input type="checkbox" class="path-opt" value="h" checked> 橫向</label>
+                <label class="checkbox-item"><input type="checkbox" class="path-opt" value="v" checked> 縱向</label>
+                <label class="checkbox-item"><input type="checkbox" class="path-opt" value="d" checked> 斜向</label>
+            </div>
+        </div>
+        <button id="save-settings" style="width:100%; padding:15px; background:#28a745; color:white; border:none; border-radius:10px; font-size: 20px;">儲存並重置</button>
+        <button id="exit-settings" style="width:100%; padding:15px; background:#666; color:white; border:none; border-radius:10px; margin-top:10px; font-size: 18px;">返回</button>
+        <div style="height: 30px;"></div>
+    </div>
+
+    <div id="target-container">
+        <div id="hitbox"></div> 
+        <div id="target-img"></div>
+        <div id="dwell-bar-container"><div id="dwell-bar-fill"></div></div>
+    </div>
+
+    <canvas id="fw-canvas"></canvas>
+
+    <script>
+        const sndMagic = document.getElementById('snd-magic');
+        const sndHandsup = document.getElementById('snd-handsup');
+        
+        function unlockAudio(audio) {
+            audio.muted = false;
+            audio.currentTime = 0;
+            audio.play().catch(e => console.log("等待互動解鎖中..."));
+        }
+
+        document.getElementById('test-audio-btn').onclick = () => { unlockAudio(sndMagic); };
+
+        document.getElementById('start-btn').onclick = () => {
+            [sndMagic, sndHandsup].forEach(a => { a.play().then(()=>{ a.pause(); a.currentTime=0; }).catch(()=>{}); });
+            document.getElementById('start-overlay').style.display = 'none';
+            startGameLoop();
+            startNextRound();
+        };
+
+        const container = document.getElementById('target-container');
+        const hitbox = document.getElementById('hitbox');
+        const img = document.getElementById('target-img');
+        const dwellBar = document.getElementById('dwell-bar-container');
+        const dwellFill = document.getElementById('dwell-bar-fill');
+
+        let score = 0;
+        let isTransforming = false; 
+        // 預設 hitboxScale 為 1.2 (正常版)
+        let config = { size: 250, speed: 15, dwell: 1.0, butterflyTime: 4.0, paths: ['h', 'v', 'd'], hitboxScale: 1.2 };
+        let watchdogTimer = null;
+
+        let isHovering = false;
+        let dwellProgress = 0; 
+        let gameLoop = null;
+
+        hitbox.addEventListener('pointerenter', () => isHovering = true);
+        hitbox.addEventListener('pointerleave', () => isHovering = false);
+        hitbox.addEventListener('pointerdown', (e) => { e.preventDefault(); isHovering = true; });
+        hitbox.addEventListener('pointerup', () => isHovering = false);
+
+        function startGameLoop() {
+            clearInterval(gameLoop);
+            gameLoop = setInterval(() => {
+                if (isTransforming) return;
+
+                if (isHovering) {
+                    dwellProgress += (100 / (config.dwell * 1000 / 30));
+                    dwellBar.style.display = 'block';
+                } else {
+                    dwellProgress -= 2.5; 
+                    if (dwellProgress <= 0) {
+                        dwellProgress = 0;
+                        dwellBar.style.display = 'none';
+                    }
+                }
+
+                dwellProgress = Math.min(100, Math.max(0, dwellProgress));
+                dwellFill.style.width = dwellProgress + '%';
+
+                if (dwellProgress >= 100) {
+                    isHovering = false;
+                    dwellProgress = 0;
+                    doTransform();
+                }
+            }, 30);
+        }
+
+        function updateHitboxSize() {
+            // 自動計算 Hitbox 偏移量，讓它永遠置中於圖片
+            const scale = config.hitboxScale;
+            hitbox.style.width = (scale * 100) + '%';
+            hitbox.style.height = (scale * 100) + '%';
+            hitbox.style.top = (-((scale - 1) / 2) * 100) + '%';
+            hitbox.style.left = (-((scale - 1) / 2) * 100) + '%';
+        }
+
+        function startNextRound() {
+            if (watchdogTimer) clearTimeout(watchdogTimer);
+            isTransforming = false;
+            
+            img.style.backgroundImage = "url('momo.png')";
+            img.classList.remove('pulsing');
+            container.style.width = config.size + 'px';
+            container.style.height = config.size + 'px';
+            container.style.transform = 'scale(1)';
+            container.style.zIndex = 10;
+            dwellBar.style.display = 'none';
+            dwellFill.style.width = '0%';
+            dwellProgress = 0;
+            
+            updateHitboxSize(); // 每次重置時更新判定範圍
+
+            const vw = window.innerWidth - config.size;
+            const vh = window.innerHeight - config.size;
+            const mode = config.paths[Math.floor(Math.random() * config.paths.length)];
+            const isReverse = Math.random() > 0.5; 
+
+            let sx, sy, ex, ey;
+            if(mode === 'h') { sy = ey = Math.random() * vh; sx = isReverse ? window.innerWidth + 100 : -config.size - 100; ex = isReverse ? -config.size - 100 : window.innerWidth + 100; }
+            else if(mode === 'v') { sx = ex = Math.random() * vw; sy = isReverse ? window.innerHeight + 100 : -config.size - 100; ey = isReverse ? -config.size - 100 : window.innerHeight + 100; }
+            else { if(isReverse) { sx = vw + 100; sy = -100; ex = -100; ey = vh + 100; } else { sx = -100; sy = -100; ex = vw + 100; ey = vh + 100; } }
+
+            container.style.transition = 'none';
+            container.style.left = sx + 'px';
+            container.style.top = sy + 'px';
+            
+            setTimeout(() => {
+                if(isTransforming) return;
+                container.style.transition = `left ${config.speed}s linear, top ${config.speed}s linear`;
+                container.style.left = ex + 'px';
+                container.style.top = ey + 'px';
+                watchdogTimer = setTimeout(() => { if (!isTransforming) startNextRound(); }, (config.speed * 1000) + 1000);
+            }, 100);
+        }
+
+        function doTransform() {
+            if (isTransforming) return;
+            isTransforming = true;
+            if (watchdogTimer) clearTimeout(watchdogTimer);
+
+            const rect = container.getBoundingClientRect();
+            container.style.transition = 'none';
+            container.style.left = rect.left + 'px';
+            container.style.top = rect.top + 'px';
+
+            img.style.backgroundImage = "url('butterfly.gif')";
+            
+            sndMagic.currentTime = 0;
+            sndMagic.play().catch(e => console.log("Play failed"));
+
+            const minScreen = Math.min(window.innerWidth, window.innerHeight);
+            const scale = (minScreen * 0.85) / config.size;
+            const cx = (window.innerWidth - config.size) / 2;
+            const cy = (window.innerHeight - config.size) / 2;
+
+            setTimeout(() => {
+                container.style.transition = 'all 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+                container.style.zIndex = 999;
+                container.style.left = cx + 'px';
+                container.style.top = cy + 'px';
+                container.style.transform = `scale(${scale})`;
+                setTimeout(() => { if(isTransforming) img.classList.add('pulsing'); }, 800);
+            }, 50);
+
+            score++;
+            document.getElementById('counter').innerText = `進度: ${score} / 5`;
+            setTimeout(() => { if (score >= 5) triggerCelebration(); else startNextRound(); }, config.butterflyTime * 1000); 
+        }
+
+        function triggerCelebration() {
+            const canvas = document.getElementById('fw-canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            sndHandsup.currentTime = 0;
+            sndHandsup.play().catch(e => console.log("Play failed"));
+
+            let particles = [];
+            for(let i=0; i<150; i++) { particles.push({ x: canvas.width/2, y: canvas.height/2, vx: (Math.random()-0.5)*20, vy: (Math.random()-0.5)*20, c: `hsl(${Math.random()*360},100%,50%)` }); }
+            let timer = setInterval(() => {
+                ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+                particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.2; ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, 7); ctx.fill(); });
+            }, 30);
+            setTimeout(() => { clearInterval(timer); ctx.clearRect(0,0,canvas.width,canvas.height); score = 0; document.getElementById('counter').innerText = `進度: 0 / 5`; startNextRound(); }, 10000); 
+        }
+
+        document.getElementById('size-slider').oninput = function() { document.getElementById('size-val').innerText = this.value; };
+        document.getElementById('dwell-slider').oninput = function() { document.getElementById('dwell-val').innerText = parseFloat(this.value).toFixed(1); };
+        document.getElementById('btimer-slider').oninput = function() { document.getElementById('btimer-val').innerText = parseFloat(this.value).toFixed(1); };
+        document.getElementById('speed-slider').oninput = function() { document.getElementById('speed-val').innerText = this.value; };
+        
+        document.getElementById('settings-btn').onclick = () => { document.getElementById('settings-panel').style.display = 'block'; };
+        document.getElementById('exit-settings').onclick = () => { document.getElementById('settings-panel').style.display = 'none'; };
+        document.getElementById('save-settings').onclick = () => {
+            config.size = parseInt(document.getElementById('size-slider').value);
+            config.speed = parseInt(document.getElementById('speed-slider').value);
+            config.dwell = parseFloat(document.getElementById('dwell-slider').value);
+            config.butterflyTime = parseFloat(document.getElementById('btimer-slider').value);
+            
+            // 讀取新的觸控判定範圍
+            config.hitboxScale = parseFloat(document.getElementById('hitbox-select').value);
+            
+            const opts = document.querySelectorAll('.path-opt:checked');
+            config.paths = Array.from(opts).map(o => o.value);
+            if(config.paths.length === 0) config.paths = ['h'];
+            
+            document.getElementById('settings-panel').style.display = 'none';
+            score = 0; document.getElementById('counter').innerText = `進度: 0 / 5`;
+            startNextRound();
+        };
+    </script>
+</body>
+</html>

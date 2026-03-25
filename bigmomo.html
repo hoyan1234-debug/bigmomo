@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>手眼協調 - 點擊長大遊戲</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; touch-action: none; font-family: -apple-system, sans-serif; }
+        
+        #start-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 9999; display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; text-align: center; }
+        .btn-large { padding: 25px 40px; font-size: 28px; cursor: pointer; border: none; border-radius: 20px; margin: 15px; font-weight: bold; }
+        #test-audio-btn { background: #ffaa00; color: #000; }
+        #start-btn { background: #28a745; color: white; }
+
+        /* 目標容器與圖片 */
+        #target-container { position: absolute; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); pointer-events: none; }
+        
+        #hitbox { position: absolute; border-radius: 50%; z-index: 20; width: 120%; height: 120%; top: -10%; left: -10%; pointer-events: none; }
+        #target-img { background-size: contain; background-repeat: no-repeat; background-position: center; width: 100%; height: 100%; pointer-events: none; }
+        
+        /* 點擊時的彈跳動畫 */
+        @keyframes pop-anim { 0% { transform: scale(1); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
+        .popping { animation: pop-anim 0.2s ease-out; }
+        
+        /* 蝴蝶呼吸動畫 */
+        @keyframes butterfly-pulse { 0% { transform: scale(1); } 100% { transform: scale(1.05); } }
+        .pulsing { animation: butterfly-pulse 0.8s ease-in-out infinite alternate; }
+
+        #settings-btn { position: fixed; top: 20px; left: 20px; z-index: 100; background: rgba(255,255,255,0.2); color: white; border: 1px solid #fff; padding: 12px 20px; border-radius: 10px; font-size: 18px; cursor: pointer; }
+        #settings-panel { position: fixed; top: 0; left: 0; width: 340px; max-width: 90vw; height: 100%; background: #1a1a1a; color: white; padding: 20px; z-index: 1000; display: none; overflow-y: auto; box-sizing: border-box;}
+        
+        .setting-item { margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        label { display: block; margin-bottom: 8px; font-size: 18px; color: #00FFCC; }
+        input[type="range"] { width: 100%; height: 40px; }
+        .checkbox-item { display: flex; align-items: center; font-size: 18px; color: white; margin-top: 10px;}
+        .checkbox-item input { width: 25px; height: 25px; margin-right: 15px; }
+
+        #counter { position: fixed; top: 20px; right: 20px; color: #FFFF00; font-size: 30px; font-weight: bold; pointer-events: none; z-index: 50; }
+        #fw-canvas { position: fixed; top:0; left:0; pointer-events: none; z-index: 90; }
+    </style>
+</head>
+<body>
+
+    <audio id="snd-magic" src="magic.mp3" preload="auto"></audio>
+    <audio id="snd-handsup" src="handsup.mp3" preload="auto"></audio>
+
+    <div id="start-overlay">
+        <h1>🖐️ 點擊長大遊戲</h1>
+        <p style="color:#ccc; font-size:18px; margin-bottom: 30px;">請先點擊黃色按鈕測試聲音，再開始遊戲</p>
+        <button id="test-audio-btn" class="btn-large">🔊 1. 測試音效</button>
+        <button id="start-btn" class="btn-large">✅ 2. 開始教學</button>
+    </div>
+
+    <button id="settings-btn">⚙️ 設定</button>
+    <div id="counter">進度: 0 / 5</div>
+
+    <div id="settings-panel">
+        <h2 style="margin-top:0;">教學設定</h2>
+        <div class="setting-item">
+            <label>需要點擊幾次變身: <span id="clicks-val">10</span> 次</label>
+            <input type="range" id="clicks-slider" min="1" max="20" value="10">
+        </div>
+        <div class="setting-item">
+            <label>初始大小: <span id="min-size-val">100</span>px</label>
+            <input type="range" id="min-size-slider" min="50" max="200" step="10" value="100">
+        </div>
+        <div class="setting-item">
+            <label>🦋 蝴蝶展示時間: <span id="btimer-val">4</span> 秒</label>
+            <input type="range" id="btimer-slider" min="3" max="15" step="1" value="4">
+        </div>
+        <label class="checkbox-item"><input type="checkbox" id="move-on-click"> 點擊後隨機移動 (進階手眼協調)</label>
+        
+        <div style="margin-top: 20px;">
+            <button id="save-settings" style="width:100%; padding:15px; background:#28a745; color:white; border:none; border-radius:10px; font-size: 20px;">儲存並重置</button>
+            <button id="exit-settings" style="width:100%; padding:15px; background:#666; color:white; border:none; border-radius:10px; margin-top:10px; font-size: 18px;">返回</button>
+        </div>
+    </div>
+
+    <div id="target-container">
+        <div id="hitbox"></div> 
+        <div id="target-img"></div>
+    </div>
+
+    <canvas id="fw-canvas"></canvas>
+
+    <script>
+        const sndMagic = document.getElementById('snd-magic');
+        const sndHandsup = document.getElementById('snd-handsup');
+        let audioCtx = null;
+        
+        function playPopSound(step, maxSteps) {
+            if (!audioCtx) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            const baseFreq = 300 + (step * (400 / maxSteps)); 
+            osc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(baseFreq * 1.5, audioCtx.currentTime + 0.1);
+            
+            gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.1);
+        }
+
+        document.getElementById('test-audio-btn').onclick = () => {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            audioCtx.resume();
+            sndMagic.muted = false; sndMagic.currentTime = 0; sndMagic.play().catch(e=>{});
+        };
+
+        document.getElementById('start-btn').onclick = () => {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            audioCtx.resume();
+            [sndMagic, sndHandsup].forEach(a => { a.play().then(()=>{ a.pause(); a.currentTime=0; }).catch(()=>{}); });
+            document.getElementById('start-overlay').style.display = 'none';
+            startNextRound();
+        };
+
+        const container = document.getElementById('target-container');
+        const img = document.getElementById('target-img');
+
+        let score = 0;
+        let currentClicks = 0;
+        let isTransforming = false; 
+        
+        let config = { 
+            minSize: 100, 
+            clicksNeeded: 10, 
+            butterflyTime: 4.0,
+            moveOnClick: false
+        };
+
+        // 🌟 核心修改：將互動邏輯獨立成一個函數，讓「滑鼠/觸控」和「鍵盤/外置拍掣」都能共用
+        function handleInteraction(e) {
+            // 如果是鍵盤事件，但按下的不是 空白鍵(Space) 或 Enter 鍵，就不做反應
+            if (e.type === 'keydown' && e.code !== 'Space' && e.code !== 'Enter') {
+                return;
+            }
+
+            // 避免點擊設定選單時觸發遊戲
+            if (e.target && e.target.closest) {
+                if (e.target.closest('#settings-btn') || 
+                    e.target.closest('#settings-panel') || 
+                    e.target.closest('#start-overlay')) {
+                    return;
+                }
+            }
+
+            // 阻止預設行為（例如：防止空白鍵造成網頁往下捲動）
+            e.preventDefault();
+
+            if (isTransforming) return;
+
+            currentClicks++;
+            playPopSound(currentClicks, config.clicksNeeded);
+
+            img.classList.remove('popping');
+            void img.offsetWidth; 
+            img.classList.add('popping');
+
+            if (currentClicks >= config.clicksNeeded) {
+                doTransform();
+            } else {
+                const fullScreenSize = Math.min(window.innerWidth, window.innerHeight) * 0.95; 
+                const sizeRange = fullScreenSize - config.minSize;
+                const newSize = config.minSize + (sizeRange * (currentClicks / config.clicksNeeded));
+                
+                container.style.width = newSize + 'px';
+                container.style.height = newSize + 'px';
+
+                if (config.moveOnClick) {
+                    setRandomPosition(newSize);
+                } else {
+                    const cx = (window.innerWidth - newSize) / 2;
+                    const cy = (window.innerHeight - newSize) / 2;
+                    container.style.left = cx + 'px';
+                    container.style.top = cy + 'px';
+                }
+            }
+        }
+
+        // 🌟 核心修改：同時監聽「螢幕點擊」與「鍵盤按鍵 (外置拍掣)」
+        document.addEventListener('pointerdown', handleInteraction);
+        document.addEventListener('keydown', handleInteraction);
+
+        function setRandomPosition(size) {
+            const maxX = Math.max(0, window.innerWidth - size);
+            const maxY = Math.max(0, window.innerHeight - size);
+            const randomX = Math.max(10, Math.min(maxX - 10, Math.random() * maxX));
+            const randomY = Math.max(10, Math.min(maxY - 10, Math.random() * maxY));
+            
+            container.style.left = randomX + 'px';
+            container.style.top = randomY + 'px';
+        }
+
+        function startNextRound() {
+            isTransforming = false;
+            currentClicks = 0;
+            
+            sndHandsup.pause();
+            
+            img.style.backgroundImage = "url('momo.png')";
+            img.classList.remove('pulsing');
+            img.classList.remove('popping');
+            
+            container.style.width = config.minSize + 'px';
+            container.style.height = config.minSize + 'px';
+            container.style.transform = 'scale(1)';
+            container.style.zIndex = 10;
+            
+            if (config.moveOnClick) {
+                setRandomPosition(config.minSize);
+            } else {
+                const cx = (window.innerWidth - config.minSize) / 2;
+                const cy = (window.innerHeight - config.minSize) / 2;
+                container.style.left = cx + 'px';
+                container.style.top = cy + 'px';
+            }
+        }
+
+        function doTransform() {
+            isTransforming = true;
+
+            const fullScreenSize = Math.min(window.innerWidth, window.innerHeight);
+            const cx = (window.innerWidth - fullScreenSize) / 2;
+            const cy = (window.innerHeight - fullScreenSize) / 2;
+            
+            container.style.left = cx + 'px';
+            container.style.top = cy + 'px';
+            container.style.width = fullScreenSize + 'px';
+            container.style.height = fullScreenSize + 'px';
+
+            img.style.backgroundImage = "url('butterfly.gif')";
+            
+            sndMagic.currentTime = 0;
+            sndMagic.play().catch(e => console.log("Play failed"));
+
+            sndHandsup.currentTime = 0;
+            sndHandsup.play().catch(e => console.log("Play failed"));
+
+            setTimeout(() => {
+                container.style.zIndex = 999;
+                container.style.transform = `scale(1)`;
+                setTimeout(() => { if(isTransforming) img.classList.add('pulsing'); }, 800);
+            }, 50);
+
+            score++;
+            document.getElementById('counter').innerText = `進度: ${score} / 5`;
+            
+            setTimeout(() => { 
+                if (score >= 5) triggerCelebration(); 
+                else startNextRound(); 
+            }, config.butterflyTime * 1000); 
+        }
+
+        function triggerCelebration() {
+            const canvas = document.getElementById('fw-canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            sndHandsup.currentTime = 0;
+            sndHandsup.play().catch(e => console.log("Play failed"));
+
+            let particles = [];
+            for(let i=0; i<150; i++) { particles.push({ x: canvas.width/2, y: canvas.height/2, vx: (Math.random()-0.5)*20, vy: (Math.random()-0.5)*20, c: `hsl(${Math.random()*360},100%,50%)` }); }
+            let timer = setInterval(() => {
+                ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+                particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.2; ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, 7); ctx.fill(); });
+            }, 30);
+            
+            setTimeout(() => { 
+                clearInterval(timer); 
+                ctx.clearRect(0,0,canvas.width,canvas.height); 
+                score = 0; 
+                document.getElementById('counter').innerText = `進度: 0 / 5`; 
+                startNextRound(); 
+            }, 10000); 
+        }
+
+        // --- UI 連動與設定 ---
+        document.getElementById('clicks-slider').oninput = function() { document.getElementById('clicks-val').innerText = this.value; };
+        document.getElementById('min-size-slider').oninput = function() { document.getElementById('min-size-val').innerText = this.value; };
+        document.getElementById('btimer-slider').oninput = function() { document.getElementById('btimer-val').innerText = this.value; };
+        
+        document.getElementById('settings-btn').onclick = () => { document.getElementById('settings-panel').style.display = 'block'; };
+        document.getElementById('exit-settings').onclick = () => { document.getElementById('settings-panel').style.display = 'none'; };
+        document.getElementById('save-settings').onclick = () => {
+            config.clicksNeeded = parseInt(document.getElementById('clicks-slider').value);
+            config.minSize = parseInt(document.getElementById('min-size-slider').value);
+            config.butterflyTime = parseFloat(document.getElementById('btimer-slider').value);
+            config.moveOnClick = document.getElementById('move-on-click').checked;
+            
+            document.getElementById('settings-panel').style.display = 'none';
+            score = 0; document.getElementById('counter').innerText = `進度: 0 / 5`;
+            startNextRound();
+        };
+    </script>
+</body>
+</html>
